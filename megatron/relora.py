@@ -1,25 +1,10 @@
-import os
 import math
-import json
-from typing import List
-from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from transformers import AutoModelForCausalLM, AutoConfig
-
-
-@dataclass
-class ReLoRaConfig:
-    r: int
-    lora_alpha: int
-    lora_dropout: float
-    target_modules: List[str]
-    keep_original_weights: bool
-    lora_only: bool = False
-    trainable_scaling: bool = False
+from megatron import print_rank_0
 
 
 def merge_and_reinit_functional(module):
@@ -41,12 +26,9 @@ class ReLoRaModel(torch.nn.Module):
         self,
         model,
         *,
-        target_modules,
         r=128,
         lora_alpha=32,
         lora_dropout=0.1,
-        keep_original_weights=True,
-        lora_only=False,
         trainable_scaling=False,
     ):
         if r <= 0:
@@ -57,31 +39,16 @@ class ReLoRaModel(torch.nn.Module):
         self.r = r
         self.lora_alpha = lora_alpha
         self.lora_dropout = lora_dropout
-        self.target_modules = target_modules
-        self.keep_original_weights = keep_original_weights
-        self.lora_only = lora_only
         self.trainable_scaling = trainable_scaling
-
-        self._config = ReLoRaConfig(
-            r=r,
-            lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            target_modules=target_modules,
-            keep_original_weights=keep_original_weights,
-        )
 
         # patch methods
         self.forward = self.wrapped_model.forward
 
-        target_modules_list = target_modules
-        if isinstance(target_modules_list, str):
-            target_modules_list = [target_modules_list]
-
         for module_name, module in self.wrapped_model.named_modules():
             if not isinstance(module, nn.Linear):
                 continue
-
-            if not any(target_key in module_name for target_key in target_modules_list):
+            if isinstance(module, ReLoRaLinear):
+                print_rank_0("WARNING: Trying to wrap ReLoRA into ReLoRA. Are you sure this is what you want?")
                 continue
 
             new_module = ReLoRaLinear(
@@ -94,18 +61,14 @@ class ReLoRaModel(torch.nn.Module):
                 lora_only=self.lora_only,
                 trainable_scaling=self.trainable_scaling,
             )
-            if self.keep_original_weights:
-                new_module.weight.data = module.weight.data
-                if module.bias is not None:
-                    new_module.bias.data = module.bias.data
-                # make lora'ed network to be exacty the same as the original network at initialization
-                nn.init.zeros_(new_module.lora_A.weight)
-                assert new_module.lora_A.bias is None
-                assert new_module.lora_B.bias is None
 
-            if self.lora_only:
-                assert not self.keep_original_weights
-                module.weight = None
+            new_module.weight.data = module.weight.data
+            if module.bias is not None:
+                new_module.bias.data = module.bias.data
+            # make lora'ed network to be exacty the same as the original network at initialization
+            nn.init.zeros_(new_module.lora_A.weight)
+            assert new_module.lora_A.bias is None
+            assert new_module.lora_B.bias is None
 
             parent = self._get_parent(module_name)
             module_suffix = module_name.split(".")[-1]
@@ -122,35 +85,18 @@ class ReLoRaModel(torch.nn.Module):
             if isinstance(module, ReLoRaLinear):
                 module.merge_and_reinit()
 
+    def merge_and_unwrap(self) -> nn.Module:
+        self.merge_and_reinit()
+        return self.wrapped_model
+    
     def save_pretrained(self, path):
-        self.wrapped_model.save_pretrained(path)
-        with open(os.path.join(path, "relora_config.json"), "w") as f:
-            json.dump(self._config.__dict__, f, indent=4)
+        raise RuntimeError("Call .merge_and_unwrap() and save the unwrapped model instead")
 
-    @classmethod
-    def from_pretrained(cls, path):
-        with open(os.path.join(path, "relora_config.json"), "r") as f:
-            relora_config = json.load(f)
+    def state_dict(self):
+        raise RuntimeError("Call .merge_and_unwrap() and save the unwrapped model instead")
 
-        config = AutoConfig.from_pretrained(path)
-
-        base_model = AutoModelForCausalLM.from_config(config)
-        if "keep_original" in relora_config:
-            print("WARNING: keep_original is deprecated. Use lora_only instead.")
-            print(f"keep_original: {relora_config['keep_original']}")
-            relora_config["lora_only"] = not relora_config.pop("keep_original")
-            relora_config["keep_original_weights"] = not relora_config["lora_only"]
-
-        if "trainable_scaling" not in relora_config:
-            relora_config["trainable_scaling"] = False
-
-        model = cls(base_model, **relora_config)
-
-        with open(os.path.join(path, "pytorch_model.bin"), "rb") as f:
-            state_dict = torch.load(f, map_location="cpu")
-
-        model.wrapped_model.load_state_dict(state_dict, strict=True)
-        return model
+    def load_state_dict(self, state_dict):
+        raise RuntimeError("Call .merge_and_unwrap() and save the unwrapped model instead")
 
 
 # The code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
@@ -162,7 +108,6 @@ class ReLoRaLinear(nn.Linear):
         r: int,
         lora_alpha: int = 1,
         lora_dropout: float = 0.1,
-        lora_only: bool = False,
         trainable_scaling: bool = False,
         **kwargs,
     ):
@@ -173,20 +118,13 @@ class ReLoRaLinear(nn.Linear):
         if r <= 0:
             raise ValueError("r must be positive. If you want r == 0, use the original model.")
 
-        if not lora_only:
-            # if full model weight + lora weight
-            nn.Linear.__init__(self, in_features, out_features, **kwargs)
-        else:
-            nn.Module.__init__(self)
-            self.weight = None
-            self.bias = None
+        nn.Linear.__init__(self, in_features, out_features, **kwargs)
 
         self.in_features = in_features
         self.out_features = out_features
         self.r = r
         self.lora_alpha = lora_alpha
         self.lora_dropout = nn.Dropout(p=lora_dropout)
-        self.lora_only = lora_only
         self.trainable_scaling = trainable_scaling
 
         if r > 0:
@@ -198,8 +136,7 @@ class ReLoRaLinear(nn.Linear):
                 self.scaling = self.lora_alpha / self.r
 
             # Freezing the pre-trained weight matrix
-            if not self.lora_only:
-                self.weight.requires_grad = False
+            self.weight.requires_grad = False
         self.reset_parameters()
 
     def reset_parameters(self):
