@@ -47,6 +47,10 @@ from .neox_args import (
     NeoXArgsLRScheduler,
     ATTENTION_TYPE_CHOICES,
 )
+from .relora_args import (
+    NeoXArgsReLoRAConfig,
+    NeoXArgsReLoRATrainingConfig,
+)
 
 # ZERO defaults by deespeed
 # These values should not be changed unless defaults in deepspeed are changed
@@ -95,6 +99,8 @@ BASE_CLASSES = [
     NeoXArgsLogging,
     NeoXArgsTextgen,
     NeoXArgsOther,
+    NeoXArgsReLoRAConfig,
+    NeoXArgsReLoRATrainingConfig,
 ]
 
 DEEPSPEED_ARG_CLASSES = [NeoXArgsDeepspeedRunner, NeoXArgsDeepspeedConfig]

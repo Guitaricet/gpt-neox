@@ -43,6 +43,7 @@ from megatron.model import (
     SoftEmbedding,
     get_params_for_weight_decay_optimization,
 )
+from megatron.relora.relora import ReLoRaModel
 from megatron.checkpointing import load_checkpoint, save_checkpoint
 from megatron.data.data_utils import build_train_valid_test_data_iterators
 from megatron.initialize import initialize_megatron
@@ -82,6 +83,15 @@ def save_base_shapes(neox_args, base_shapes, use_cache):
                     parallel_output=True,
                     topology=mpu.get_topology(),
                     use_cache=use_cache)
+
+    if getattr(neox_args, "relora", False):
+        base_model = ReLoRaModel(
+            base_model,
+            r=neox_args.relora_r,
+            lora_alpha=neox_args.relora_alpha,
+            lora_dropout=neox_args.relora_dropout,
+            keep_original_weights=True,
+        )
 
     if not neox_args.is_pipe_parallel:
         base_model = base_model.to_sequential()
