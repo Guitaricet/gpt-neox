@@ -28,9 +28,7 @@ except ImportError:
 @dataclass
 class NeoXArgsReLoRAConfig(NeoXArgsTemplate):
     """
-    Args for deepspeed config
-    Every argument included here will be included in deepspeed config json
-    #TODO this list is not complete as compared to https://www.deepspeed.ai/docs/config-json/
+    Args for ReLoRA config
     """
 
     relora: bool = False
@@ -49,12 +47,13 @@ class NeoXArgsReLoRAConfig(NeoXArgsTemplate):
     """whether to make alpha trainable for ReLoRA. Not recommended for now, but might be fun to explore"""
 
 
+@dataclass
 class NeoXArgsReLoRATrainingConfig(NeoXArgsTemplate):
-    reset_frequency: int = 5000
+    relora_reset_frequency: int = 5000
     """How often (in upadte iterations) to perform .merge_and_reinit() on the model"""
 
-    reset_warmup_steps: int = 100
+    relora_reset_warmup_steps: int = 100
     """Short warmup after .merge_and_reinit() to avoid instability. Recommended: 10-100"""
 
-    optimizer_reset_amount: float = 0.9
+    relora_optimizer_reset_amount: float = 0.9
     """How much to reset (magnitude prune) the optimizer after .merge_and_reinit(). Recommended: 0.9-0.99"""

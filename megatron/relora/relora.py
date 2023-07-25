@@ -7,20 +7,6 @@ import torch.nn.functional as F
 from megatron import print_rank_0
 
 
-def merge_and_reinit_functional(module):
-    if not isinstance(module, ReLoRaLinear):
-        return
-
-    _delta = module.lora_B.weight @ module.lora_A.weight
-    _delta = _delta * module._post_lora_scale()
-    module.weight.data += _delta
-    nn.init.kaiming_uniform_(module.lora_A.weight, a=math.sqrt(5))
-
-    nn.init.zeros_(module.lora_B.weight)
-    if module.trainable_scaling:
-        nn.init.zeros_(module.scaling)
-
-
 class ReLoRaModel(torch.nn.Module):
     def __init__(
         self,
@@ -88,7 +74,7 @@ class ReLoRaModel(torch.nn.Module):
     def merge_and_unwrap(self) -> nn.Module:
         self.merge_and_reinit()
         return self.wrapped_model
-    
+
     def save_pretrained(self, path):
         raise RuntimeError("Call .merge_and_unwrap() and save the unwrapped model instead")
 
@@ -96,7 +82,7 @@ class ReLoRaModel(torch.nn.Module):
         raise RuntimeError("Call .merge_and_unwrap() and save the unwrapped model instead")
 
     def load_state_dict(self, state_dict):
-        raise RuntimeError("Call .merge_and_unwrap() and save the unwrapped model instead")
+        raise RuntimeError("Call .merge_and_unwrap() and load the unwrapped model instead")
 
 
 # The code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py

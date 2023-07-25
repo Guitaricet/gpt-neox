@@ -1,0 +1,13 @@
+{
+  # NeoXArgsReLoRAConfig
+  "relora": false,
+  "relora_r": 128,
+  "relora_alpha": 32,
+  "relora_dropout": 0.1,
+  "relora_trainable_scaling": false,
+
+  # NeoXArgsReLoRATrainingConfig
+  "relora_reset_frequency": 5000,
+  "relora_reset_warmup_steps": 100,
+  "relora_optimizer_reset_amount": 0.9
+}
